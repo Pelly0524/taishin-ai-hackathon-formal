@@ -6,6 +6,7 @@ import warnings
 from dotenv import load_dotenv
 import pandas as pd
 import joblib
+import boto3
 from generator.full_auto_feature_generator import FraudDetectionFeatureGenerator
 from service.utils import load_optimal_threshold
 
@@ -17,6 +18,8 @@ TEST_DATA = os.environ.get('TEST_DATA_PATH')
 TEST_ANS_FILE = 'dataset/Test/(Test)ANS_參賽者_202501.csv'
 MODEL_PATH = 'models/fraud_detection_model.joblib'
 OUTPUT_PATH = os.environ.get('OUTPUT_PATH', 'dataset/Output')
+S3_BUCKET = os.environ.get('S3_BUCKET', 'your-bucket-name')
+S3_PREFIX = os.environ.get('S3_PREFIX', 'predictions/')
 
 warnings.filterwarnings('ignore')
 
@@ -127,6 +130,17 @@ def predict_test_fraud(model_path, features, account_numbers):
 
     return account_risk, high_risk
 
+def upload_to_s3(file_path, s3_key):
+    """上傳檔案到 S3"""
+    try:
+        s3_client = boto3.client('s3')
+        s3_client.upload_file(file_path, S3_BUCKET, s3_key)
+        print(f"成功上傳檔案到 S3: s3://{S3_BUCKET}/{s3_key}")
+        return True
+    except Exception as e:
+        print(f"上傳檔案到 S3 時發生錯誤: {str(e)}")
+        return False
+
 def update_test_ans_file(test_ans_file, high_risk_accounts, account_risk):
     """更新測試答案文件"""
     print(f"\n更新測試答案文件: {test_ans_file}")
@@ -154,6 +168,10 @@ def update_test_ans_file(test_ans_file, high_risk_accounts, account_risk):
         print(f"成功將預測結果保存至新檔案：{new_file_path}")
         print(f"已標記 {len(high_risk_accounts)} 個高風險帳戶")
         
+        # 上傳到 S3
+        s3_key = f"{S3_PREFIX}{name}_predicted{ext}"
+        upload_to_s3(new_file_path, s3_key)
+        
         # 新增一個包含所有帳號風險值的輸出檔案
         risk_df = pd.DataFrame({
             'ACCT_NBR': account_risk.index,
@@ -173,6 +191,10 @@ def update_test_ans_file(test_ans_file, high_risk_accounts, account_risk):
         # 保存風險值檔案
         risk_df.to_csv(risk_file_path, index=False)
         print(f"成功將風險值結果保存至新檔案：{risk_file_path}")
+        
+        # 上傳到 S3
+        s3_key = f"{S3_PREFIX}{name}_risk{ext}"
+        upload_to_s3(risk_file_path, s3_key)
         
     except Exception as e:
         print(f"更新測試答案文件時發生錯誤: {str(e)}")
